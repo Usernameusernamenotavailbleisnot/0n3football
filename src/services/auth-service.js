@@ -10,6 +10,7 @@
 const ethers = require('ethers');
 const ApiClient = require('./api-client');
 const config = require('../config');
+const { sleep } = require('../utils/retry');
 
 class AuthService {
   /**
@@ -38,11 +39,24 @@ class AuthService {
   async getNonce() {
     this.logger.debug('Getting authentication nonce');
     
-    const response = await this.apiClient.privyRequest('/init', {
-      address: this.wallet.address
-    });
-    
-    return response.data.nonce;
+    try {
+      const response = await this.apiClient.privyRequest('/init', {
+        address: this.wallet.address
+      });
+      
+      if (!response.data || !response.data.nonce) {
+        throw new Error('Invalid nonce response from Privy');
+      }
+      
+      this.logger.debug('Nonce received successfully');
+      return response.data.nonce;
+    } catch (error) {
+      this.logger.error('Failed to get nonce', {
+        error: error.message,
+        status: error.response?.status
+      });
+      throw new Error(`Failed to get nonce: ${error.message}`);
+    }
   }
   
   /**
@@ -54,26 +68,67 @@ class AuthService {
       this.logger.info(`Starting authentication for wallet: ${this.wallet.address}`);
       
       // Step 1: Get authentication nonce
-      const nonce = await this.getNonce();
+      const nonceResponse = await this.apiClient.privyRequest('/init', {
+        address: this.wallet.address
+      });
+      
+      if (!nonceResponse.data || !nonceResponse.data.nonce) {
+        throw new Error('Failed to get authentication nonce');
+      }
+      
+      const nonce = nonceResponse.data.nonce;
       const timestamp = new Date().toISOString();
       
       // Step 2: Create SIWE message
       const message = this.createSiweMessage(nonce, timestamp);
-      this.logger.debug('Created SIWE message', { message });
+      this.logger.debug('Created SIWE message');
       
       // Step 3: Sign the message
       const signature = await this.wallet.signMessage(message);
       this.logger.info('Message signed successfully');
       
+      // Add delay between requests
+      await sleep(1000);
+      
       // Step 4: Authenticate with Privy
-      const privyResponse = await this.authenticateWithPrivy(message, signature);
+      const privyResponse = await this.apiClient.privyRequest('/authenticate', {
+        message,
+        signature,
+        chainId: "eip155:1",
+        walletClientType: "rabby_wallet",
+        connectorType: "injected",
+        mode: "login-or-sign-up"
+      });
+      
+      if (!privyResponse.data || !privyResponse.data.token) {
+        throw new Error('Failed to authenticate with Privy');
+      }
+      
       const privyToken = privyResponse.data.token;
       const privyIdToken = privyResponse.data.identity_token;
       
       this.logger.info('Privy authentication successful');
       
+      // Add delay between requests
+      await sleep(1000);
+      
       // Step 5: Login to Deform with Privy token
-      const deformResponse = await this.loginToDeform(privyToken);
+      const deformResponse = await this.apiClient.graphqlRequest(
+        "UserLogin",
+        `mutation UserLogin($data: UserLoginInput!) {
+          userLogin(data: $data)
+        }`,
+        {
+          data: {
+            externalAuthToken: privyToken
+          }
+        }
+      );
+      
+      if (!deformResponse.data?.data?.userLogin) {
+        throw new Error('Failed to login to Deform');
+      }
+      
       const deformToken = deformResponse.data.data.userLogin;
       
       this.logger.info('Deform authentication successful');
@@ -125,14 +180,24 @@ Resources:
    * @returns {Promise<Object>} Privy authentication response
    */
   async authenticateWithPrivy(message, signature) {
-    return await this.apiClient.privyRequest('/authenticate', {
-      message,
-      signature,
-      chainId: "eip155:1",
-      walletClientType: "rabby_wallet",
-      connectorType: "injected",
-      mode: "login-or-sign-up"
-    });
+    this.logger.debug('Authenticating with Privy');
+    
+    try {
+      return await this.apiClient.privyRequest('/authenticate', {
+        message,
+        signature,
+        chainId: "eip155:1",
+        walletClientType: "rabby_wallet",
+        connectorType: "injected",
+        mode: "login-or-sign-up"
+      });
+    } catch (error) {
+      this.logger.error('Privy authentication failed', {
+        error: error.message,
+        status: error.response?.status
+      });
+      throw new Error(`Privy authentication failed: ${error.message}`);
+    }
   }
   
   /**
@@ -141,19 +206,36 @@ Resources:
    * @returns {Promise<Object>} Deform login response
    */
   async loginToDeform(privyToken) {
-    const loginMutation = `mutation UserLogin($data: UserLoginInput!) {
-      userLogin(data: $data)
-    }`;
+    this.logger.info('Logging in to Deform with Privy token');
     
-    return await this.apiClient.graphqlRequest(
-      "UserLogin",
-      loginMutation,
-      {
-        data: {
-          externalAuthToken: privyToken
+    try {
+      const loginMutation = `mutation UserLogin($data: UserLoginInput!) {
+        userLogin(data: $data)
+      }`;
+      
+      const response = await this.apiClient.graphqlRequest(
+        "UserLogin",
+        loginMutation,
+        {
+          data: {
+            externalAuthToken: privyToken
+          }
         }
+      );
+      
+      if (!response.data?.data?.userLogin) {
+        throw new Error('Invalid login response from Deform');
       }
-    );
+      
+      this.logger.info('Login to Deform successful');
+      return response;
+    } catch (error) {
+      this.logger.error('Deform login failed', {
+        error: error.message,
+        status: error.response?.status
+      });
+      throw new Error(`Deform login failed: ${error.message}`);
+    }
   }
 }
 
