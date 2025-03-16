@@ -13,6 +13,7 @@ const Wallet = require('./models/wallet');
 const AuthService = require('./services/auth-service');
 const TaskService = require('./services/task-service');
 const { sleep } = require('./utils/retry');
+const { getProxyDisplayString } = require('./utils/proxy');
 
 class TaskProcessor {
   /**
@@ -56,12 +57,12 @@ class TaskProcessor {
       });
       
       // Log wallet addresses
-      //this.wallets.forEach((wallet, index) => {
-      //  this.logger.info(`Initialized wallet ${index + 1}`, { 
-      //    address: wallet.getAddress(),
-      //    proxyHost: wallet.getProxyConfig()?.host || 'No Proxy'
-      //  });
-      //});
+      this.wallets.forEach((wallet, index) => {
+        this.logger.info(`Initialized wallet ${index + 1}`, { 
+          address: wallet.getAddress(),
+          proxy: getProxyDisplayString(wallet.getProxyConfig())
+        });
+      });
       
       return this.wallets;
     } catch (error) {
@@ -142,7 +143,13 @@ class TaskProcessor {
       return {
         wallet: wallet.getAddress(),
         error: error.message,
-        success: false
+        success: false,
+        totalTasks: 0,
+        completedCount: 0,
+        failedCount: 0,
+        totalPoints: 0,
+        completedTasks: [],
+        failedTasks: []
       };
     }
   }
