@@ -1,0 +1,17 @@
+{
+    "d05d17cb-9ecd-404e-850e-f7d92b895bb4": [
+      { "questionId": "q1", "answers": [{ "id": "a", "text": "1,400,000" }] },
+      { "questionId": "q2", "answers": [{ "id": "d", "text": "128k+" }] },
+      { "questionId": "q3", "answers": [{ "id": "d", "text": "Utility token" }] }
+    ],
+    "b5df53a7-1777-4fb4-b334-b2bfc23f1993": [
+      { "questionId": "q1", "answers": [{ "id": "b", "text": "Start of \"Extra Time\", the last chance to earn ⚽️ BALLS" }] },
+      { "questionId": "q2", "answers": [{ "id": "d", "text": "100k+" }] }
+    ],
+    "09f14492-1706-4d15-8fa8-babf687f6c3e": [
+      { "questionId": "q2", "answers": [{ "id": "d", "text": "400k Followers on X" }] }
+    ],
+    "f9df435c-cdab-4992-af97-cb8f37e00f13": [
+      { "questionId": "q1", "answers": [{ "id": "d", "text": "@_viN040" }] }
+    ]
+  }
