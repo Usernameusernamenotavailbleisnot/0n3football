@@ -214,6 +214,11 @@ class TaskService {
         { campaignId: config.CAMPAIGN_ID }
       );
       
+      if (!response.data?.data?.campaign?.activities) {
+        this.logger.warn('No activities found in campaign response');
+        return [];
+      }
+      
       // Filter incomplete tasks
       const allIncompleteTasks = this.filterIncompleteTasks(
         response.data.data.campaign.activities
@@ -234,7 +239,7 @@ class TaskService {
       
       if (skippedTasks.length > 0) {
         this.logger.info(`Skipping ${skippedTasks.length} tasks that require manual action:`, {
-          //skippedTasks: skippedTasks.map(t => `${t.title} (${t.type})`)
+          skippedTasks: skippedTasks.map(t => `${t.title} (${t.type})`)
         });
       }
       
@@ -246,7 +251,7 @@ class TaskService {
         walletAddress: this.walletAddress,
         error: error.message
       });
-      throw error;
+      return [];
     }
   }
   
@@ -340,25 +345,33 @@ class TaskService {
    * @returns {Promise<Object>} Verification result
    */
   async defaultVerifyTask(activityId) {
-    const response = await this.apiClient.graphqlRequest(
-      "VerifyActivity",
-      VERIFY_MUTATION,
-      { data: { activityId } }
-    );
-    
-    const result = response.data?.data?.verifyActivity?.record;
-    
-    if (result) {
-      // Extract only essential information from the result
-      const essentialInfo = {
-        status: result.status,
-        points: result.rewardRecords?.[0]?.appliedRewardQuantity || 0
-      };
+    try {
+      const response = await this.apiClient.graphqlRequest(
+        "VerifyActivity",
+        VERIFY_MUTATION,
+        { data: { activityId } }
+      );
       
-      //this.logger.info('Task verification result', essentialInfo);
+      const result = response.data?.data?.verifyActivity?.record;
+      
+      if (result) {
+        // Extract only essential information from the result
+        const essentialInfo = {
+          status: result.status,
+          points: result.rewardRecords?.[0]?.appliedRewardQuantity || 0
+        };
+        
+        this.logger.info('Task verification result', essentialInfo);
+      }
+      
+      return result;
+    } catch (error) {
+      this.logger.error('Task verification failed', {
+        activityId,
+        error: error.message
+      });
+      return null;
     }
-    
-    return result;
   }
   
   /**
@@ -471,6 +484,20 @@ class TaskService {
   async processAllTasks() {
     try {
       const tasks = await this.getAvailableTasks();
+      
+      if (!tasks || tasks.length === 0) {
+        this.logger.info(`No tasks available for wallet ${this.walletAddress}`);
+        return {
+          walletAddress: this.walletAddress,
+          totalTasks: 0,
+          completedCount: 0,
+          failedCount: 0,
+          totalPoints: 0,
+          completedTasks: [],
+          failedTasks: []
+        };
+      }
+      
       const completedTasks = [];
       const failedTasks = [];
 
@@ -516,12 +543,7 @@ class TaskService {
           }
         } catch (taskError) {
           this.logger.error(`Error processing task - ${task.title}`, { 
-            error: taskError.message,
-            taskDetails: {
-              id: task.id,
-              title: task.title,
-              type: task.type
-            }
+            error: taskError.message
           });
           failedTasks.push({
             title: task.title,
@@ -545,19 +567,29 @@ class TaskService {
         failedTasks
       };
 
-     // this.logger.info(`=== TASKS SUMMARY FOR ${this.walletAddress} ===`, {
-      //  totalTasks: tasks.length,
-      //  completedTasks: completedTasks.length,
-      //  failedTasks: failedTasks.length,
-      //  totalPoints: totalPoints
-     // });
+      this.logger.info(`=== TASKS SUMMARY FOR ${this.walletAddress} ===`, {
+        totalTasks: tasks.length,
+        completedTasks: completedTasks.length,
+        failedTasks: failedTasks.length,
+        totalPoints: totalPoints
+      });
 
       return summary;
     } catch (error) {
       this.logger.error(`Fatal error in task processing for ${this.walletAddress}`, { 
         error: error.message
       });
-      throw error;
+      
+      return {
+        walletAddress: this.walletAddress,
+        error: error.message,
+        totalTasks: 0,
+        completedCount: 0,
+        failedCount: 0,
+        totalPoints: 0,
+        completedTasks: [],
+        failedTasks: []
+      };
     }
   }
 }
