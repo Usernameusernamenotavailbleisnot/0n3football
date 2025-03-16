@@ -1,11 +1,7 @@
 /**
- * Retry Mechanism Utilities
+ * Simplified Retry Utility
  * 
- * Provides functions for operation retries with configurable:
- * - Maximum retry attempts
- * - Delay between retries
- * - Exponential backoff
- * - Success/failure hooks
+ * A simple and direct implementation for retrying operations
  */
 
 /**
@@ -14,81 +10,56 @@
  * @returns {Promise} Promise that resolves after delay
  */
 function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Simple retry function - no recursion to avoid stack overflow
+ * @param {Function} fn - Async function to retry
+ * @param {Object} options - Options
+ * @returns {Promise} - Result of the function
+ */
+async function retry(fn, options = {}) {
+  const { 
+    retries = 5,
+    delay = 3000,
+    logger = console,
+    onRetry = null
+  } = options;
   
-  /**
-   * Executes an operation with retry logic
-   * 
-   * @param {Function} operation - Async function to execute with retries
-   * @param {Object} options - Retry options
-   * @param {number} options.maxRetries - Maximum number of retry attempts
-   * @param {number} options.retryDelay - Base delay between retries in ms
-   * @param {boolean} options.exponentialBackoff - Whether to use exponential backoff
-   * @param {Function} options.onRetry - Hook called before each retry attempt
-   * @param {Function} options.logger - Logger instance
-   * @returns {Promise} Result of the operation
-   */
-  async function withRetry(operation, options = {}) {
-    const {
-      maxRetries = 10,
-      retryDelay = 5000,
-      exponentialBackoff = true,
-      onRetry = null,
-      logger = console
-    } = options;
+  let lastError;
   
-    let lastError = null;
-  
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        return await operation(attempt);
-      } catch (error) {
-        lastError = error;
-        
-        // Log failure
-        const errorMsg = `${error.message} (${error.code || 'NO_CODE'})`;
-        logger.warn(`Attempt ${attempt + 1}/${maxRetries} failed: ${errorMsg}`, {
-          attempt: attempt + 1,
-          maxRetries,
-          errorMessage: errorMsg,
-          responseStatus: error.response?.status
-        });
-  
-        // Check if this was the last attempt
-        if (attempt === maxRetries - 1) {
-          logger.error('Operation failed after maximum retries', { 
-            error,
-            attempts: maxRetries
-          });
-          throw error;
-        }
-        
-        // Calculate delay for next attempt (with exponential backoff if enabled)
-        const delay = exponentialBackoff 
-          ? retryDelay * Math.pow(2, attempt)
-          : retryDelay;
-        
-        // Call the onRetry hook if provided
-        if (onRetry && typeof onRetry === 'function') {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      const retryDelay = Math.min(delay * (i + 1), 15000); // Cap at 15 seconds
+      
+      logger.warn(`Attempt ${i + 1}/${retries} failed: ${err.message || 'Unknown error'}`, {
+        attempt: i + 1,
+        retries
+      });
+      
+      if (i < retries - 1) {
+        if (onRetry) {
           try {
-            await onRetry(attempt, error, delay);
-          } catch (hookError) {
-            logger.warn('Error in retry hook', { error: hookError.message });
+            await onRetry(i, err);
+          } catch (hookErr) {
+            // Ignore errors in the retry hook
           }
         }
         
-        logger.info(`Retrying in ${delay/1000} seconds...`);
-        await sleep(delay);
+        logger.info(`Retrying in ${Math.round(retryDelay/1000)} seconds...`);
+        await sleep(retryDelay);
       }
     }
-    
-    // This code should not be reached due to the final throw above,
-    // but is included for safety
-    throw lastError;
   }
   
-  module.exports = {
-    sleep,
-    withRetry
-  };
+  throw lastError;
+}
+
+module.exports = {
+  sleep,
+  retry
+};
